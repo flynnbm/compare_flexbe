@@ -36,6 +36,7 @@ class GetPointCloudServiceState(EventState):
     """
     def __init__(self, service_timeout=5.0, service_name='/get_point_cloud', camera_topic='/rgbd_camera/points', target_frame='/base_link'):
         super().__init__(outcomes=['finished', 'failed'],
+                            input_keys=['camera_pose'],
                             output_keys=['cloud_out', 'camera_pose', 'cloud_frame']
         )
         self._camera_topic = camera_topic
@@ -63,6 +64,7 @@ class GetPointCloudServiceState(EventState):
 
         try:
             userdata.cloud_out = self._res.cloud_out
+            # userdata.camera_pose = userdata.camera_pose.append(self._res.camera_pose) # this needs to be fixed, might return None
             userdata.camera_pose = self._res.camera_pose
             userdata.cloud_frame = self._res.cloud_frame
             Logger.loginfo(f"[{type(self).__name__}] Received result with {self._res.success}.")
