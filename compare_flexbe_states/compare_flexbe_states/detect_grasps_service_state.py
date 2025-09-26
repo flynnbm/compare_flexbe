@@ -18,7 +18,10 @@ import rclpy
 from rclpy.task import Future
 from rclpy.duration import Duration
 
+import numpy as np
+
 from flexbe_core import EventState, Logger
+from flexbe_core.proxy import ProxyServiceCaller
 
 from gpd_ros.srv import DetectGrasps as SrvType
 from gpd_ros.msg import CloudIndexed, CloudSources
@@ -55,23 +58,29 @@ class DetectGraspsServiceState(EventState):
         self._client = None
         self._future = None
 
+        # Create proxy service caller to handle rclpy node
+        self._srv = ProxyServiceCaller({self._service_name: SrvType})
+
+        # result storage
+        self._res = None
+        self._had_error = False
+
     def execute(self, userdata):
         # Execute this method periodically while the state is active.
         # Main purpose is to check state conditions and trigger a corresponding outcome.
         # If no outcome is returned, the state will stay active.
 
-        if self._future is None:
+        # Check for error or no response
+        if self._had_error or self._res is None:
             return 'failed'
 
-        if self._future.done():
-            try:
-                result = self._future.result()
-                userdata.grasp_configs = result.grasp_configs
-                Logger.loginfo(f"[{type(self).__name__}] Received grasp configs with {len(result.grasp_configs.grasps)} grasps.")
-                return 'done'
-            except Exception as e:
-                Logger.logerr(f"[{type(self).__name__}] Service call failed: {str(e)}")
-                return 'failed'
+        try:
+            result = self._future.result()
+            userdata.grasp_configs = result.grasp_configs
+            Logger.loginfo(f"[{type(self).__name__}] Received grasp configs with {len(result.grasp_configs.grasps)} grasps.")
+        except Exception as e:
+            Logger.logerr(f"[{type(self).__name__}] Service call failed: {str(e)}")
+            return 'failed'
 
         return None  # still waiting
 
@@ -84,32 +93,49 @@ class DetectGraspsServiceState(EventState):
             return [v if isinstance(v, Int64) else Int64(data=int(v)) for v in seq]
 
         # helper: ensure that inputs are geometry_msgs/msg/Point[]
-        def as_points(seq):
-            return [p if isinstance(p, Point) else Point(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in seq]
+        # def as_points(seq):
+        #     return [p if isinstance(p, Point) else Point(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in seq]
+
+        # figure out how many points are in the cloud
+        num_points = userdata.cloud.width * userdata.cloud.height
+
+        # create a list of zeros matching the size
+        camera_sources = [0] * num_points
+
+        # or, if as_int64_array expects a numpy array
+        camera_sources = np.zeros(num_points, dtype=np.int64)
 
         # construct cloud_sources
         cloud_sources = CloudSources()
         cloud_sources.cloud = userdata.cloud
-        cloud_sources.camera_source = as_int64_array(userdata.camera_source)
-        cloud_sources.view_points = as_points(userdata.view_points)
+        cloud_sources.camera_source = as_int64_array(camera_sources)
+        # cloud_sources.view_points = as_points(userdata.view_points)
+        cloud_sources.view_points = [userdata.view_points]
 
         # construct cloud_indexed
         cloud_indexed = CloudIndexed()
         cloud_indexed.cloud_sources = cloud_sources
-        cloud_indexed.indices = as_int64_array(userdata.indices)
+        # cloud_indexed.indices = as_int64_array(userdata.indices)
+        cloud_indexed.indices = userdata.indices
 
         # construct request
         request = SrvType.Request()
         request.cloud_indexed = cloud_indexed
 
+        # wait for availability (once per entry)
+        if not self._srv.is_available(self._service_name):
+            Logger.logerr(f"[{type(self).__name__}] Service '{self._service_name}' not available after {self._service_timeout}s.")
+            self._had_error = True
+            return
+
         # send request
         try:
-            self._future = self._client.call_async(request)
-            Logger.loginfo(f"[{type(self).__name__}] Sent request to {self._service_name} service.")
+            self._res = self._srv.call(self._service_name, request)
+            Logger.loginfo(f"[{type(self).__name__}] Called service '{self._service_name}'.")
         except Exception as e:
-            Logger.logerr(f"[{type(self).__name__}] Failed to send request: {str(e)}")
+            Logger.logerr(f"[{type(self).__name__}] Service call failed: {e}")
 
-    def on_exit(self):
+    def on_exit(self, userdata):
         # Call this method when an outcome is returned and another state gets active.
         # It can be used to stop possibly running processes started by on_enter.
 
@@ -121,19 +147,12 @@ class DetectGraspsServiceState(EventState):
         # If possible, it is generally better to initialize used resources in the constructor
         #   because if anything failed, the behavior would not even be started.
 
-        # create the service client, andensure that the service server is initialized
-        self._client = type(self).create_client(SrvType, self._service_name)
-        if not self._client.wait_for_service(timeout_sec=self._service_timeout):
-            Logger.logerr(f"[{type(self).__name__}] Service {self._service_name} not available after waiting.")
-            return 'failed'
+        # No-op: template hook
+        pass
 
     def on_stop(self):
         # Call this method whenever the behavior stops execution, also if it is cancelled.
         # Use this event to clean up things like claimed resources.
 
-        # make sure the client is destroyed when the behavior ends so it can restart cleanly
-        if self._client:
-            try:
-                self._client.destroy()
-            except Exception:
-                pass
+        # No-op: template hook
+        pass
