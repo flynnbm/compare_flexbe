@@ -34,6 +34,7 @@ Created on Wed Aug 27 2025
 """
 
 
+from compare_flexbe_states.detect_grasps_service_state import DetectGraspsServiceState
 from compare_flexbe_states.euclidean_clustering_service_state import EuclideanClusteringServiceState
 from compare_flexbe_states.filter_by_indices_service_state import FilterByIndicesServiceState
 from compare_flexbe_states.get_point_cloud_service_state import GetPointCloudServiceState
@@ -85,13 +86,14 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
         """Create state machine."""
         # Root state machine
         # x:135 y:388, x:251 y:389
-        _state_machine = OperatableStateMachine(outcomes=['finished', 'failed'])
+        _state_machine = OperatableStateMachine(outcomes=['finished', 'failed'], output_keys=['target_cluster_indexed', 'scene_pointcloud'])
         _state_machine.userdata.scene_pointcloud = 0
         _state_machine.userdata.camera_pose = 0
         _state_machine.userdata.target_cluster_indexed = 0
         _state_machine.userdata.obstacle_clusters_indexed = 0
         _state_machine.userdata.cluster_count = 0
         _state_machine.userdata.point_cloud_visual = 0
+        _state_machine.userdata.camera_source = 0
 
         # Additional creation code can be added inside the following tags
         # [MANUAL_CREATE]
@@ -106,23 +108,37 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                                                  service_name='/get_point_cloud',
                                                                  camera_topic='/rgbd_camera/points',
                                                                  target_frame='panda_link0'),
-                                       transitions={'finished': 'EuclideanClustering'  # 181 59 -1 -1 -1 -1
+                                       transitions={'finished': 'EuclideanClustering'  # 180 59 -1 -1 -1 -1
                                                     , 'failed': 'failed'  # 155 81 228 116 -1 -1
                                                     },
                                        autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
-                                       remapping={'cloud_out': 'scene_pointcloud',
-                                                  'camera_pose': 'camera_pose',
+                                       remapping={'camera_pose': 'camera_pose',
+                                                  'cloud_out': 'scene_pointcloud',
                                                   'cloud_frame': 'cloud_frame'})
 
-            # x:346 y:62
+            # x:593 y:192
+            OperatableStateMachine.add('DetectGrasps',
+                                       DetectGraspsServiceState(service_timeout=5.0,
+                                                                service_name='/detect_grasps'),
+                                       transitions={'done': 'FilterByIndices'  # 704 124 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 291 238 -1 -1 -1 -1
+                                                    },
+                                       autonomy={'done': Autonomy.Off, 'failed': Autonomy.Off},
+                                       remapping={'cloud': 'scene_pointcloud',
+                                                  'camera_source': 'camera_source',
+                                                  'view_points': 'camera_pose',
+                                                  'indices': 'target_cluster_indices',
+                                                  'grasp_configs': 'grasp_configs'})
+
+            # x:344 y:61
             OperatableStateMachine.add('EuclideanClustering',
                                        EuclideanClusteringServiceState(service_timeout=5.0,
                                                                        service_name='/euclidean_clustering',
                                                                        cluster_tolerance=0.02,
                                                                        min_cluster_size=100,
                                                                        max_cluster_size=25000),
-                                       transitions={'finished': 'FilterByIndices'  # 628 78 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 222 55 408 115 -1 -1
+                                       transitions={'finished': 'DetectGrasps'  # 575 147 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 222 55 406 114 -1 -1
                                                     },
                                        autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud_in': 'scene_pointcloud',
@@ -130,23 +146,23 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                                   'target_cluster_indices': 'target_cluster_indices',
                                                   'obstacle_cluster_indices': 'obstacle_cluster_indices'})
 
-            # x:660 y:58
+            # x:823 y:55
             OperatableStateMachine.add('FilterByIndices',
                                        FilterByIndicesServiceState(service_timeout=5.0,
                                                                    service_name='/filter_by_indices'),
-                                       transitions={'finished': 'PublishPointCloud'  # 913 49 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 337 50 -1 -1 -1 -1
+                                       transitions={'finished': 'PublishPointCloud'  # 1025 49 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 371 50 -1 -1 -1 -1
                                                     },
                                        autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud_in': 'scene_pointcloud',
                                                   'target_indices': 'target_cluster_indices',
                                                   'cloud_out': 'point_cloud_visual'})
 
-            # x:946 y:56
+            # x:1051 y:56
             OperatableStateMachine.add('PublishPointCloud',
                                        PublishPointCloudState(pub_topic='/filtered_cloud/target_object'),
-                                       transitions={'done': 'finished'  # 472 58 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 467 59 -1 -1 -1 -1
+                                       transitions={'done': 'finished'  # 516 58 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 500 59 -1 -1 -1 -1
                                                     },
                                        autonomy={'done': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud_in': 'point_cloud_visual'})
