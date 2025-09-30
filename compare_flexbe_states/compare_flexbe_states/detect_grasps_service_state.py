@@ -80,7 +80,8 @@ class DetectGraspsServiceState(EventState):
             Logger.logerr(f"[{type(self).__name__}] Service call failed: {str(e)}")
             return 'failed'
 
-        return None  # still waiting
+        # Return outcome finished
+        return 'finished'
 
     def on_enter(self, userdata):
         # Call this method a single time when the state becomes active, when a transition from another state to this one is taken.
