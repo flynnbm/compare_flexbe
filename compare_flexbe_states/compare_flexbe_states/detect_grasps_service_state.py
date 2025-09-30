@@ -74,9 +74,8 @@ class DetectGraspsServiceState(EventState):
             return 'failed'
 
         try:
-            result = self._future.result()
-            userdata.grasp_configs = result.grasp_configs
-            Logger.loginfo(f"[{type(self).__name__}] Received grasp configs with {len(result.grasp_configs.grasps)} grasps.")
+            userdata.grasp_configs = self._res.grasp_configs
+            Logger.loginfo(f"[{type(self).__name__}] Received grasp configs with {len(self._res.grasp_configs.grasps)} grasps.")
         except Exception as e:
             Logger.logerr(f"[{type(self).__name__}] Service call failed: {str(e)}")
             return 'failed'
