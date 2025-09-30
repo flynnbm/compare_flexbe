@@ -19,6 +19,7 @@ from rclpy.task import Future
 from rclpy.duration import Duration
 
 import numpy as np
+from typing import Iterable
 
 from flexbe_core import EventState, Logger
 from flexbe_core.proxy import ProxyServiceCaller
@@ -26,7 +27,8 @@ from flexbe_core.proxy import ProxyServiceCaller
 from gpd_ros.srv import DetectGrasps as SrvType
 from gpd_ros.msg import CloudIndexed, CloudSources
 from std_msgs.msg import Int64
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Pose, PoseStamped
+from pcl_msgs.msg import PointIndices
 
 class DetectGraspsServiceState(EventState):
     """
@@ -43,9 +45,6 @@ class DetectGraspsServiceState(EventState):
     <= done               Service call succeeded
     <= failed             Service call failed or timed out
     """
-
-    SERVICE_NAME = '/detect_grasps'
-
     def __init__(self, service_timeout=5.0, service_name='/detect_grasps'):
         # Declare outcomes, input_keys, and output_keys by calling the super constructor with the corresponding arguments.
 
@@ -93,8 +92,16 @@ class DetectGraspsServiceState(EventState):
             return [v if isinstance(v, Int64) else Int64(data=int(v)) for v in seq]
 
         # helper: ensure that inputs are geometry_msgs/msg/Point[]
-        # def as_points(seq):
-        #     return [p if isinstance(p, Point) else Point(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in seq]
+        def as_points(seq):
+            return [p if isinstance(p, Point) else Point(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in seq]
+
+        def as_int64_msgs(seq: Iterable[int]) -> list[Int64]:
+            # Handles Python ints and numpy ints transparently
+            return [Int64(data=int(v)) for v in seq]
+
+        def pointindices_to_int64_msgs(pi: PointIndices) -> list[Int64]:
+            # Widen int32 -> int64 and wrap each element as std_msgs/Int64
+            return as_int64_msgs(pi.indices)
 
         # figure out how many points are in the cloud
         num_points = userdata.cloud.width * userdata.cloud.height
@@ -110,13 +117,28 @@ class DetectGraspsServiceState(EventState):
         cloud_sources.cloud = userdata.cloud
         cloud_sources.camera_source = as_int64_array(camera_sources)
         # cloud_sources.view_points = as_points(userdata.view_points)
-        cloud_sources.view_points = [userdata.view_points]
+        vp = userdata.view_points
+        if isinstance(vp, PoseStamped):
+            p = vp.pose.position
+        elif isinstance(vp, Pose):
+            p = vp.position
+        elif isinstance(vp, Point):
+            p = vp
+        else:
+            raise TypeError(f"view_points must be Point/Pose/PoseStamped, got {type(vp)}")
+
+        cloud_sources.view_points = [Point(x=p.x, y=p.y, z=p.z)]
 
         # construct cloud_indexed
         cloud_indexed = CloudIndexed()
         cloud_indexed.cloud_sources = cloud_sources
-        # cloud_indexed.indices = as_int64_array(userdata.indices)
-        cloud_indexed.indices = userdata.indices
+
+        # conversion: pcl_msgs/PointIndices -> std_msgs/Int64[]
+        if isinstance(userdata.indices, PointIndices):
+            cloud_indexed.indices = pointindices_to_int64_msgs(userdata.indices)
+        else:
+            # If it is already the right type (e.g., [Int64] or [int])
+            cloud_indexed.indices = as_int64_array(userdata.indices)
 
         # construct request
         request = SrvType.Request()
