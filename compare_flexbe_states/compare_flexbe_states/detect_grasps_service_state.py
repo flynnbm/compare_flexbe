@@ -55,7 +55,6 @@ class DetectGraspsServiceState(EventState):
         self._service_name = service_name
         self._service_timeout = service_timeout
         self._client = None
-        self._future = None
 
         # Create proxy service caller to handle rclpy node
         self._srv = ProxyServiceCaller({self._service_name: SrvType})
@@ -81,7 +80,7 @@ class DetectGraspsServiceState(EventState):
             return 'failed'
 
         # Return outcome finished
-        return 'finished'
+        return 'done'
 
     def on_enter(self, userdata):
         # Call this method a single time when the state becomes active, when a transition from another state to this one is taken.
