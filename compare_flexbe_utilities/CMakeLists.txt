@@ -22,7 +22,6 @@ find_package(pcl_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(PCL REQUIRED)
-find_package(gpd_ros REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 
 # Generate service
@@ -40,7 +39,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     pcl_msgs
     geometry_msgs
     std_msgs
-    gpd_ros
 )
 
 include_directories(
@@ -95,7 +93,6 @@ ament_target_dependencies(euclidean_clustering_service
   geometry_msgs
   pcl_conversions
   pcl_msgs
-  gpd_ros
 )
 target_link_libraries(euclidean_clustering_service ${PCL_LIBRARIES})
 
