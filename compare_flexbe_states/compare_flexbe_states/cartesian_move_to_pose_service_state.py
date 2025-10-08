@@ -20,7 +20,7 @@ from rclpy.duration import Duration
 from flexbe_core import EventState, Logger
 from flexbe_core.proxy import ProxyServiceCaller
 
-from robot_common_manip.srv import CartesianMoveToPose as SrvType
+from compare_flexbe_utilities.srv import CartesianMoveToPose as SrvType
 from geometry_msgs.msg import Pose
 
 class CartesianMoveToPoseServiceState(EventState):
@@ -30,19 +30,22 @@ class CartesianMoveToPoseServiceState(EventState):
     -- timeout_sec     float        Timeout for waiting for service (default: 5.0)
     -- service_name    str          Service name (default: '/plan_cartesian_path')
 
-    ># waypoints       list         A list of geometry_msgs/Pose to move through
+    ># waypoints        list        A list of geometry_msgs/Pose to move through
+    ># waypoint_index   int         Iterator index selecting which set of waypoints to try this time (0-based)
+    <# waypoint_index   int         Iterator index will be incremented on 'done' and 'next'
 
-    <= finished                     Path was planned and executed finishedfully
-    <= failure                      Service failed or did not complete finishedfully
+    <= done                         Path was planned and executed finishedfully
+    <= next                         Path was planned but failed, try next set of waypoints (increment iterator)
+    <= failed                       Service failed or did not complete finishedfully
     """
     def __init__(self, service_timeout=5.0, service_name='/plan_cartesian_path'):
-        super().__init__(outcomes=['finished', 'failure'],
-                            input_keys=['waypoints']
+        super().__init__(outcomes=['done', 'next', 'failed'],
+                            input_keys=['waypoints', 'waypoint_index'],
+                            output_keys=['waypoint_index']
         )
-        self.service_timeout = service_timeout
         self._service_name = service_name
+        self._service_timeout = service_timeout
         self._client = None
-        self._future = None
 
         # Create proxy service caller to handle rclpy node
         self._srv = ProxyServiceCaller({self._service_name: SrvType})
@@ -60,28 +63,45 @@ class CartesianMoveToPoseServiceState(EventState):
         if self._had_error or self._res is None:
             return 'failed'
 
-        # No output userdata to write
-        
-        # Return outcome finished
-        return 'finished'
+        try:
+            Logger.loginfo(f"[{type(self).__name__}] Finished plan with result: {self._res.success}.")
+            userdata.waypoint_index += 1
+            if self._res.success == 1 :
+                return 'done'
+            if (userdata.waypoint_index + 1) < len(userdata.waypoints):
+                userdata.waypoint_index = userdata.waypoint_index + 1
+                return 'next'
+            else:
+                # This was the last set of waypoints
+                return 'failed'
+        except Exception as e:
+            Logger.logerr(f"[{type(self).__name__}] Service call failed: {str(e)}")
+            return 'failed'
+
+        # Return outcome failed if no other outcomes occur
+        return 'failed'
     
     def on_enter(self, userdata):
         # Call this method a single time when the state becomes active, when a transition from another state to this one is taken.
         # It is primarily used to start actions which are associated with this state.
 
-        # check for correct data
-        waypoints = userdata.waypoints
-        if not isinstance(waypoints, list) or len(waypoints) == 0 or not isinstance(waypoints[-1], Pose):
-            Logger.logerr(f"[{type(self).__name__}] Invalid or missing data type in userdata.")
-            return
-        
-        # construct request
-        request = SrvType.Request()
-        request.waypoints = waypoints
-
         # reset state
         self._res = None
         self._had_error = False
+
+        # Expect: waypoints = list of sets (each set is list[Pose])
+        waypoints = userdata.waypoints
+        idx = userdata.waypoint_index
+
+        # Ultra-minimal guards to avoid IndexError / bad service call
+        if not isinstance(waypoints, list) or not isinstance(idx, int) or idx < 0 or idx >= len(waypoints):
+            Logger.logerr(f"[{type(self).__name__}] waypoint_index {idx} out of range for {len(waypoints)} sets.")
+            self._had_error = True
+            return
+        
+        # construct request for current indexed waypoints
+        request = SrvType.Request()
+        request.waypoints = waypoints[idx]
 
         # wait for availability (once per entry)
         if not self._srv.is_available(self._service_name):
@@ -95,8 +115,6 @@ class CartesianMoveToPoseServiceState(EventState):
             Logger.loginfo(f"[{type(self).__name__}] Called service '{self._service_name}'.")
         except Exception as e:
             Logger.logerr(f"[{type(self).__name__}] Service call failed: {e}")
-            self._res = None
-            self._had_error = True
 
     def on_exit(self, userdata):
         # Call this method when an outcome is returned and another state gets active.
