@@ -20,7 +20,7 @@ from rclpy.duration import Duration
 from flexbe_core import EventState, Logger
 from flexbe_core.proxy import ProxyServiceCaller
 
-from robot_common_manip.srv import MoveToPose as SrvType
+from compare_flexbe_utilities.srv import MoveToPose as SrvType
 from geometry_msgs.msg import Pose
 
 class MoveToPoseServiceState(EventState):
