@@ -89,13 +89,13 @@ class CartesianMoveToPoseServiceState(EventState):
         self._res = None
         self._had_error = False
 
-        # Expect: waypoints = list of sets (each set is list[Pose])
+        # waypoints = list of sets (each set is list[Pose])
         waypoints = userdata.waypoints
         idx = userdata.waypoint_index
 
-        # Ultra-minimal guards to avoid IndexError / bad service call
+        # check for correct data
         if not isinstance(waypoints, list) or not isinstance(idx, int) or idx < 0 or idx >= len(waypoints):
-            Logger.logerr(f"[{type(self).__name__}] waypoint_index {idx} out of range for {len(waypoints)} sets.")
+            Logger.logerr(f"[{type(self).__name__}] waypoint_index {idx} out of range for {len(waypoints)} sets or invalid or missing data type in userdata.")
             self._had_error = True
             return
         
