@@ -11,7 +11,7 @@ public:
     : Node("cartesian_path_planner")
   {
     this->declare_parameter<std::string>("planning_group", "arm");
-    this->declare_parameter<double>("eef_step", 0.01);
+    this->declare_parameter<double>("eef_step", 0.005);
 
     std::string group_name;
     this->get_parameter("planning_group", group_name);
@@ -38,17 +38,27 @@ private:
   {
     // double jump_threshold = this->get_parameter("jump_threshold").as_double();
     double eef_step = this->get_parameter("eef_step").as_double();
+    // move_group_interface_->setPoseReferenceFrame("panda_link0");
+    // move_group_interface_->setStartStateToCurrentState();
 
-    std::vector<geometry_msgs::msg::Pose> waypoints(req->waypoints.begin(), req->waypoints.end());
+    std::vector<geometry_msgs::msg::Pose> waypoints;
+    waypoints.push_back(move_group_interface_->getCurrentPose().pose);
+    waypoints.insert(waypoints.end(), req->waypoints.begin(), req->waypoints.end());
+
+    // debugging messages
+    // RCLCPP_INFO(this->get_logger(), "Planning frame: %s | EEF: %s | Group: %s",
+    //           move_group_interface_->getPlanningFrame().c_str(),
+    //           move_group_interface_->getEndEffectorLink().c_str(),
+    //           move_group_interface_->getName().c_str());
 
     moveit_msgs::msg::RobotTrajectory trajectory;
     double fraction = move_group_interface_->computeCartesianPath(
       waypoints, eef_step, trajectory);
 
-    res->percentage_planned = static_cast<float>(fraction * 100.0);
+    res->percentage_planned = static_cast<float>(fraction * 100.0f);
     res->success = false;
 
-    if (fraction > 0.99)
+    if (fraction > 0.9)
     {
       moveit::planning_interface::MoveGroupInterface::Plan plan;
       plan.trajectory = trajectory;
