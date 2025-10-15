@@ -37,13 +37,13 @@ class MoveToPoseServiceState(EventState):
     """
 
     def __init__(self, timeout_sec=5.0, service_name='/move_to_pose'):
-        super().__init__(outcomes=['finished', 'failure'],
-                            input_keys=['grasp_poses']
+        super().__init__(outcomes=['done', 'next', 'failed'],
+                            input_keys=['grasp_poses', 'grasp_index'],
+                            output_keys=['grasp_index']
         )
         self._timeout_sec = timeout_sec
         self._service_name = service_name
         self._client = None
-        self._future = None
 
         # Create proxy service caller to handle rclpy node
         self._srv = ProxyServiceCaller({self._service_name: SrvType})
@@ -61,28 +61,44 @@ class MoveToPoseServiceState(EventState):
         if self._had_error or self._res is None:
             return 'failed'
 
-        # No output userdata to write
-        
-        # Return outcome finished
-        return 'finished'
+        try:
+            Logger.loginfo(f"[{type(self).__name__}] Finished plan with result: {self._res.success}.")
+            userdata.grasp_index += 1
+            if self._res.success == 1 :
+                return 'done'
+            if (userdata.grasp_index + 1) < len(userdata.grasp_poses):
+                userdata.grasp_index = userdata.grasp_index + 1
+                return 'next'
+            else:
+                # This was the last set of waypoints
+                return 'failed'
+        except Exception as e:
+            Logger.logerr(f"[{type(self).__name__}] Service call failed: {str(e)}")
+            return 'failed'
+
+        # Return outcome failed if no other outcomes occur
+        return 'failed'
     
     def on_enter(self, userdata):
         # Call this method a single time when the state becomes active, when a transition from another state to this one is taken.
         # It is primarily used to start actions which are associated with this state.
 
+        # reset state
+        self._res = None
+        self._had_error = False
+
         # check for correct data
         grasp_poses = userdata.grasp_poses
-        if not isinstance(grasp_poses, list) or len(grasp_poses) == 0 or not isinstance(grasp_poses[-1], Pose):
-            Logger.logerr(f"[{type(self).__name__}] Invalid or missing data type in userdata.")
+        idx = userdata.grasp_index
+
+        # check for correct data
+        if not isinstance(grasp_poses, list) or not isinstance(idx, int) or idx < 0 or idx >= len(grasp_poses):
+            Logger.logerr(f"[{type(self).__name__}] grasp_index {idx} out of range for {len(grasp_poses)} sets or invalid or missing data type in userdata.")
             return
 
         # construct request
         request = SrvType.Request()
-        request.target_pose = grasp_poses
-
-        # reset state
-        self._res = None
-        self._had_error = False
+        request.target_pose = grasp_poses[idx]
 
         # wait for availability (once per entry)
         if not self._srv.is_available(self._service_name):
@@ -96,8 +112,6 @@ class MoveToPoseServiceState(EventState):
             Logger.loginfo(f"[{type(self).__name__}] Called service '{self._service_name}'.")
         except Exception as e:
             Logger.logerr(f"[{type(self).__name__}] Service call failed: {e}")
-            self._res = None
-            self._had_error = True
 
     def on_exit(self, userdata):
         # Call this method when an outcome is returned and another state gets active.
