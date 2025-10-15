@@ -69,10 +69,10 @@ class MoveToNamedPoseServiceState(EventState):
         # It is primarily used to start actions which are associated with this state.
 
         # check for correct data
-        target_names = userdata.target_pose_name
-        if not isinstance(target_names, list) or len(target_names) == 0 or not isinstance(target_names[-1], str):
-            Logger.logerr(f"[{type(self).__name__}] Invalid or missing data type in userdata.")
-            return
+        # target_names = userdata.target_pose_name
+        # if not isinstance(target_names, list) or len(target_names) == 0 or not isinstance(target_names[-1], str):
+        #     Logger.logerr(f"[{type(self).__name__}] Invalid or missing data type in userdata.")
+        #     return
         
         # construct request
         target_name = userdata.target_pose_name
