@@ -23,6 +23,7 @@ find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(PCL REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 # Generate service
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -66,6 +67,7 @@ add_executable(move_to_pose_service src/move_to_pose_service.cpp)
 ament_target_dependencies(move_to_pose_service
   rclcpp
   geometry_msgs
+  visualization_msgs
   moveit_ros_planning_interface
   moveit_msgs
 )
