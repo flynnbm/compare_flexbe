@@ -3,6 +3,8 @@
 #include <moveit/move_group_interface/move_group_interface.hpp>
 #include "compare_flexbe_utilities/srv/move_to_pose.hpp"
 
+#include <visualization_msgs/msg/marker.hpp>
+
 class PosePlanner : public rclcpp::Node
 {
 public:
@@ -37,6 +39,20 @@ private:
     {
       move_group_->setPoseTarget(req->target_pose);
   
+      auto marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("debug_goal_marker", 1);
+
+      visualization_msgs::msg::Marker m;
+      m.header.stamp = this->now();
+      m.header.frame_id = "simple_pedestal";
+      m.ns = "move_to_pose_goal";
+      m.id = 0;
+      m.type = visualization_msgs::msg::Marker::SPHERE;
+      m.action = visualization_msgs::msg::Marker::ADD;
+      m.pose = req->target_pose;              // exactly what you're planning to
+      m.scale.x = m.scale.y = m.scale.z = 0.03;
+      m.color.a = 1.0; m.color.r = 0.1; m.color.g = 0.8; m.color.b = 0.2;
+      marker_pub_->publish(m);
+
       moveit::planning_interface::MoveGroupInterface::Plan plan;
       moveit::core::MoveItErrorCode planning_result = move_group_->plan(plan);
   
