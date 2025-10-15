@@ -40,6 +40,8 @@ from compare_flexbe_states.euclidean_clustering_service_state import EuclideanCl
 from compare_flexbe_states.filter_by_indices_service_state import FilterByIndicesServiceState
 from compare_flexbe_states.get_point_cloud_service_state import GetPointCloudServiceState
 from compare_flexbe_states.gpd_grasp_poses_service_state import GPDGraspPosesServiceState
+from compare_flexbe_states.move_to_named_pose_service_state import MoveToNamedPoseServiceState
+from compare_flexbe_states.move_to_pose_service_state import MoveToPoseServiceState
 from compare_flexbe_states.publish_point_cloud_state import PublishPointCloudState
 from flexbe_core import Autonomy
 from flexbe_core import Behavior
@@ -101,6 +103,8 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
         _state_machine.userdata.grasp_waypoints = []
         _state_machine.userdata.waypoint_index = 0
         _state_machine.userdata.grasp_target_poses = []
+        _state_machine.userdata.grasp_index = 0
+        _state_machine.userdata.ready_pose = 'ready'
 
         # Additional creation code can be added inside the following tags
         # [MANUAL_CREATE]
@@ -114,7 +118,7 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                        GetPointCloudServiceState(service_timeout=5.0,
                                                                  service_name='/get_point_cloud',
                                                                  camera_topic='/rgbd_camera/points',
-                                                                 target_frame='panda_link0'),
+                                                                 target_frame='simple_pedestal'),
                                        transitions={'finished': 'EuclideanClustering'  # 306 84 -1 -1 -1 -1
                                                     , 'failed': 'failed'  # 236 225 228 116 -1 -1
                                                     },
@@ -127,7 +131,7 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
             OperatableStateMachine.add('ComputePoses',
                                        GPDGraspPosesServiceState(service_timeout=5.0,
                                                                  service_name='/compute_grasp_poses'),
-                                       transitions={'done': 'MoveCartesian'  # 1483 77 -1 -1 -1 -1
+                                       transitions={'done': 'MoveReady'  # 1444 537 -1 -1 -1 -1
                                                     , 'failed': 'failed'  # 1351 236 -1 -1 -1 -1
                                                     },
                                        autonomy={'done': Autonomy.Off, 'failed': Autonomy.Off},
@@ -191,6 +195,30 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                                  'failed': Autonomy.Off},
                                        remapping={'waypoints': 'grasp_waypoints',
                                                   'waypoint_index': 'waypoint_index'})
+
+            # x:1857 y:63
+            OperatableStateMachine.add('MoveOMPL',
+                                       MoveToPoseServiceState(timeout_sec=5.0,
+                                                              service_name='/move_to_pose'),
+                                       transitions={'done': 'finished'  # 2011 316 -1 -1 -1 -1
+                                                    , 'next': 'MoveOMPL'  # 1913 215 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 2030 424 -1 -1 -1 -1
+                                                    },
+                                       autonomy={'done': Autonomy.Off,
+                                                 'next': Autonomy.Off,
+                                                 'failed': Autonomy.Off},
+                                       remapping={'grasp_poses': 'grasp_target_poses',
+                                                  'grasp_index': 'grasp_index'})
+
+            # x:1599 y:506
+            OperatableStateMachine.add('MoveReady',
+                                       MoveToNamedPoseServiceState(service_timeout=5.0,
+                                                                   service_name='/move_to_named_pose'),
+                                       transitions={'finished': 'MoveOMPL'  # 1903 523 -1 -1 -1 -1
+                                                    , 'failure': 'failed'  # 1699 674 -1 -1 -1 -1
+                                                    },
+                                       autonomy={'finished': Autonomy.Off, 'failure': Autonomy.Off},
+                                       remapping={'target_pose_name': 'ready_pose'})
 
             # x:1055 y:53
             OperatableStateMachine.add('PublishPointCloud',
