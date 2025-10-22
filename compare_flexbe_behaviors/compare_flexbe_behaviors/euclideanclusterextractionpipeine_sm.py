@@ -34,7 +34,6 @@ Created on Wed Aug 27 2025
 """
 
 
-from compare_flexbe_states.cartesian_move_to_pose_service_state import CartesianMoveToPoseServiceState
 from compare_flexbe_states.detect_grasps_service_state import DetectGraspsServiceState
 from compare_flexbe_states.euclidean_clustering_service_state import EuclideanClusteringServiceState
 from compare_flexbe_states.filter_by_indices_service_state import FilterByIndicesServiceState
@@ -89,7 +88,7 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
     def create(self):
         """Create state machine."""
         # Root state machine
-        # x:1367 y:375, x:251 y:389
+        # x:2399 y:360, x:251 y:389
         _state_machine = OperatableStateMachine(outcomes=['finished', 'failed'], output_keys=['target_cluster_indexed', 'scene_pointcloud'])
         _state_machine.userdata.scene_pointcloud = 0
         _state_machine.userdata.camera_pose = 0
@@ -105,6 +104,8 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
         _state_machine.userdata.grasp_target_poses = []
         _state_machine.userdata.grasp_index = 0
         _state_machine.userdata.ready_pose = 'ready'
+        _state_machine.userdata.snapshot_pose = 'retracted'
+        _state_machine.userdata.start_pose = 'inspect'
 
         # Additional creation code can be added inside the following tags
         # [MANUAL_CREATE]
@@ -113,26 +114,22 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
         # [/MANUAL_CREATE]
 
         with _state_machine:
-            # x:119 y:63
-            OperatableStateMachine.add('GetPointCloud',
-                                       GetPointCloudServiceState(service_timeout=5.0,
-                                                                 service_name='/get_point_cloud',
-                                                                 camera_topic='/rgbd_camera/points',
-                                                                 target_frame='simple_pedestal'),
-                                       transitions={'finished': 'EuclideanClustering'  # 306 84 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 236 225 228 116 -1 -1
+            # x:43 y:183
+            OperatableStateMachine.add('MoveForSnapshot',
+                                       MoveToNamedPoseServiceState(service_timeout=5.0,
+                                                                   service_name='/move_to_named_pose'),
+                                       transitions={'finished': 'TakeSnapshot'  # 97 124 -1 -1 -1 -1
+                                                    , 'failure': 'failed'  # 119 323 -1 -1 -1 -1
                                                     },
-                                       autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
-                                       remapping={'camera_pose': 'camera_pose',
-                                                  'cloud_out': 'scene_pointcloud',
-                                                  'cloud_frame': 'cloud_frame'})
+                                       autonomy={'finished': Autonomy.Off, 'failure': Autonomy.Off},
+                                       remapping={'target_pose_name': 'snapshot_pose'})
 
-            # x:1275 y:55
+            # x:1351 y:62
             OperatableStateMachine.add('ComputePoses',
                                        GPDGraspPosesServiceState(service_timeout=5.0,
                                                                  service_name='/compute_grasp_poses'),
-                                       transitions={'done': 'MoveReady'  # 1444 537 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 1351 236 -1 -1 -1 -1
+                                       transitions={'done': 'MoveReady'  # 1548 76 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 1416 263 -1 -1 -1 -1
                                                     },
                                        autonomy={'done': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'grasp_configs': 'grasp_configs',
@@ -140,12 +137,12 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                                   'grasp_approach_poses': 'grasp_approach_poses',
                                                   'grasp_waypoints': 'grasp_waypoints'})
 
-            # x:833 y:52
+            # x:885 y:56
             OperatableStateMachine.add('DetectGrasps',
                                        DetectGraspsServiceState(service_timeout=5.0,
                                                                 service_name='/detect_grasps'),
-                                       transitions={'done': 'PublishPointCloud'  # 1017 68 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 874 238 -1 -1 -1 -1
+                                       transitions={'done': 'PublishPointCloud'  # 1079 73 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 915 234 -1 -1 -1 -1
                                                     },
                                        autonomy={'done': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud': 'point_cloud_visual',
@@ -154,15 +151,15 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                                   'indices': 'test_indices',
                                                   'grasp_configs': 'grasp_configs'})
 
-            # x:344 y:61
+            # x:393 y:58
             OperatableStateMachine.add('EuclideanClustering',
                                        EuclideanClusteringServiceState(service_timeout=5.0,
                                                                        service_name='/euclidean_clustering',
                                                                        cluster_tolerance=0.02,
                                                                        min_cluster_size=100,
                                                                        max_cluster_size=25000),
-                                       transitions={'finished': 'FilterByIndices'  # 557 80 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 400 213 406 114 -1 -1
+                                       transitions={'finished': 'FilterByIndices'  # 606 71 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 455 228 455 111 -1 -1
                                                     },
                                        autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud_in': 'scene_pointcloud',
@@ -170,39 +167,35 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                                   'target_cluster_indices': 'target_cluster_indices',
                                                   'obstacle_cluster_indices': 'obstacle_cluster_indices'})
 
-            # x:600 y:56
+            # x:649 y:58
             OperatableStateMachine.add('FilterByIndices',
                                        FilterByIndicesServiceState(service_timeout=5.0,
                                                                    service_name='/filter_by_indices'),
-                                       transitions={'finished': 'DetectGrasps'  # 790 71 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 648 229 -1 -1 -1 -1
+                                       transitions={'finished': 'DetectGrasps'  # 841 71 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 690 233 -1 -1 -1 -1
                                                     },
                                        autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud_in': 'scene_pointcloud',
                                                   'target_indices': 'target_cluster_indices',
                                                   'cloud_out': 'point_cloud_visual'})
 
-            # x:1546 y:68
-            OperatableStateMachine.add('MoveCartesian',
-                                       CartesianMoveToPoseServiceState(service_timeout=5.0,
-                                                                       service_name='/plan_cartesian_path'),
-                                       transitions={'done': 'finished'  # 1808 313 -1 -1 -1 -1
-                                                    , 'next': 'MoveCartesian'  # 1661 226 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 1374 314 -1 -1 -1 -1
+            # x:2098 y:59
+            OperatableStateMachine.add('MoveBackToStart',
+                                       MoveToNamedPoseServiceState(service_timeout=5.0,
+                                                                   service_name='/move_to_named_pose'),
+                                       transitions={'finished': 'finished'  # 2405 210 -1 -1 -1 -1
+                                                    , 'failure': 'failed'  # 2180 353 -1 -1 -1 -1
                                                     },
-                                       autonomy={'done': Autonomy.Off,
-                                                 'next': Autonomy.Off,
-                                                 'failed': Autonomy.Off},
-                                       remapping={'waypoints': 'grasp_waypoints',
-                                                  'waypoint_index': 'waypoint_index'})
+                                       autonomy={'finished': Autonomy.Off, 'failure': Autonomy.Off},
+                                       remapping={'target_pose_name': 'start_pose'})
 
             # x:1857 y:63
             OperatableStateMachine.add('MoveOMPL',
                                        MoveToPoseServiceState(timeout_sec=5.0,
                                                               service_name='/move_to_pose'),
-                                       transitions={'done': 'finished'  # 2011 316 -1 -1 -1 -1
-                                                    , 'next': 'MoveOMPL'  # 1913 215 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 2030 424 -1 -1 -1 -1
+                                       transitions={'done': 'MoveBackToStart'  # 2041 77 -1 -1 -1 -1
+                                                    , 'next': 'MoveOMPL'  # 1939 240 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 1772 329 -1 -1 -1 -1
                                                     },
                                        autonomy={'done': Autonomy.Off,
                                                  'next': Autonomy.Off,
@@ -210,24 +203,38 @@ class EuclideanClusterExtractionPipeineSM(Behavior):
                                        remapping={'grasp_poses': 'grasp_target_poses',
                                                   'grasp_index': 'grasp_index'})
 
-            # x:1599 y:506
+            # x:1591 y:62
             OperatableStateMachine.add('MoveReady',
                                        MoveToNamedPoseServiceState(service_timeout=5.0,
                                                                    service_name='/move_to_named_pose'),
-                                       transitions={'finished': 'MoveOMPL'  # 1903 523 -1 -1 -1 -1
-                                                    , 'failure': 'failed'  # 1699 674 -1 -1 -1 -1
+                                       transitions={'finished': 'MoveOMPL'  # 1808 79 -1 -1 -1 -1
+                                                    , 'failure': 'failed'  # 1657 267 -1 -1 -1 -1
                                                     },
                                        autonomy={'finished': Autonomy.Off, 'failure': Autonomy.Off},
                                        remapping={'target_pose_name': 'ready_pose'})
 
-            # x:1055 y:53
+            # x:1135 y:60
             OperatableStateMachine.add('PublishPointCloud',
                                        PublishPointCloudState(pub_topic='/filtered_cloud/target_object'),
-                                       transitions={'done': 'ComputePoses'  # 1230 69 -1 -1 -1 -1
-                                                    , 'failed': 'failed'  # 1099 242 -1 -1 -1 -1
+                                       transitions={'done': 'ComputePoses'  # 1307 74 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 1172 242 -1 -1 -1 -1
                                                     },
                                        autonomy={'done': Autonomy.Off, 'failed': Autonomy.Off},
                                        remapping={'cloud_in': 'point_cloud_visual'})
+
+            # x:156 y:55
+            OperatableStateMachine.add('TakeSnapshot',
+                                       GetPointCloudServiceState(service_timeout=5.0,
+                                                                 service_name='/get_point_cloud',
+                                                                 camera_topic='/rgbd_camera/points',
+                                                                 target_frame='simple_pedestal'),
+                                       transitions={'finished': 'EuclideanClustering'  # 350 68 -1 -1 -1 -1
+                                                    , 'failed': 'failed'  # 289 232 265 108 -1 -1
+                                                    },
+                                       autonomy={'finished': Autonomy.Off, 'failed': Autonomy.Off},
+                                       remapping={'camera_pose': 'camera_pose',
+                                                  'cloud_out': 'scene_pointcloud',
+                                                  'cloud_frame': 'cloud_frame'})
 
         return _state_machine
 
