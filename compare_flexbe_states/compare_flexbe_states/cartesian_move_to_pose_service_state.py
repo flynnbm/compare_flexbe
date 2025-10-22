@@ -65,11 +65,10 @@ class CartesianMoveToPoseServiceState(EventState):
 
         try:
             Logger.loginfo(f"[{type(self).__name__}] Finished plan with result: {self._res.success}.")
-            userdata.waypoint_index += 1
             if self._res.success == 1 :
                 return 'done'
             if (userdata.waypoint_index + 1) < len(userdata.waypoints):
-                userdata.waypoint_index = userdata.waypoint_index + 1
+                userdata.waypoint_index += 1
                 return 'next'
             else:
                 # This was the last set of waypoints
