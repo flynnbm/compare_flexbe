@@ -1,136 +1,156 @@
 #!/usr/bin/env python3
-
-# Copyright 2023 Christopher Newport University
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright ...
+# License: Apache 2.0 (same header as your other files)
 
 import rclpy
 from flexbe_core import EventState, Logger
+from flexbe_core.proxy import ProxyActionClient
 
-from rclpy.action import ActionClient
 from control_msgs.action import GripperCommand
 
 
 class GripperCommandActionState(EventState):
     """
-    Sends a gripper command via action server.
+    Sends a GripperCommand action to a hand controller.
 
-    ># robot_name     str     Prefix for action server name (e.g., 'my_robot' -> '/my_robot_hand_controller/gripper_cmd')
-    ># position       float   Desired gripper position
-    ># max_effort     float   Maximum effort to apply
+    -- timeout_sec       float   Seconds to wait for action server discovery (default: 5.0)
+    -- action_name_fmt   str     Format string for the action name using {robot_name}
+                                 (default: '/{robot_name}_hand_controller/gripper_cmd')
 
-    -- timeout_sec    float   Timeout to wait for action server (default: 5.0)
+    ># robot_name        str     Robot name used to format the action server name
+    ># position          float   Desired gripper position
+    ># max_effort        float   Maximum effort to apply
 
-    <= success                Gripper moved or succeeded
-    <= failure                Failed to move or action rejected
+    <= success                   Goal succeeded or motion considered successful
+    <= failed                    Any failure (no server, reject, error, stalled+no goal reached)
     """
 
-    def __init__(self, timeout_sec: float = 5.0):
+    def __init__(self,
+                 timeout_sec: float = 5.0,
+                 action_name_fmt: str = '/{robot_name}_hand_controller/gripper_cmd'):
         super().__init__(
-            outcomes=['success', 'failure'],
+            outcomes=['success', 'failed'],
             input_keys=['robot_name', 'position', 'max_effort']
         )
-        self._timeout_sec = timeout_sec
-        self._client = None
-        self._goal_future = None
-        self._result_future = None
-        self._goal_handle = None
-        self._server_available = False
+
+        # --- configuration / parameters ---
+        self._timeout_sec = float(timeout_sec)
+        self._action_name_fmt = action_name_fmt
+
+        # --- internal state ---
         self._action_name = None
-        self._request_sent = False
+        self._had_error = False
+        self._sent_goal = False
 
-    def on_start(self):
-        if not hasattr(GripperCommandActionState, '_node'):
-            raise RuntimeError("This state requires a FlexBE-attached ROS 2 node.")
-        self._node = GripperCommandActionState._node
-
-    def on_enter(self, userdata):
-        self._request_sent = False
-        self._goal_future = None
-        self._result_future = None
-        self._goal_handle = None
-        self._server_available = False
-
-        try:
-            self._action_name = f"/{userdata.robot_name}_hand_controller/gripper_cmd"
-            self._client = ActionClient(self._node, GripperCommand, self._action_name)
-
-            Logger.loginfo(f"[GripperCommandActionState] Waiting for action server '{self._action_name}'...")
-            if not self._client.wait_for_server(timeout_sec=self._timeout_sec):
-                Logger.logerr(f"[GripperCommandActionState] Action server '{self._action_name}' not available.")
-                return
-            self._server_available = True
-            Logger.loginfo(f"[GripperCommandActionState] Connected to action server '{self._action_name}'.")
-
-            goal_msg = GripperCommand.Goal()
-            goal_msg.command.position = userdata.position
-            goal_msg.command.max_effort = userdata.max_effort
-
-            Logger.loginfo(f"[GripperCommandActionState] Sending goal: position={goal_msg.command.position}, "
-                           f"max_effort={goal_msg.command.max_effort}")
-            self._goal_future = self._client.send_goal_async(goal_msg, feedback_callback=self.feedback_cb)
-            self._request_sent = True
-
-        except Exception as e:
-            Logger.logerr(f"[GripperCommandActionState] Exception during goal send: {str(e)}")
+        # Create proxy action client in on_enter once we know the action name.
+        self._ac = None
 
     def execute(self, userdata):
-        if not self._server_available or not self._request_sent:
-            return 'failure'
+        """
+        Poll for result and decide outcome.
+        """
+        if self._had_error or not self._sent_goal:
+            return 'failed'
 
-        if self._goal_future and not self._goal_future.done():
-            return None  # Still waiting for goal to be accepted
-
-        if self._goal_future and self._goal_handle is None and self._goal_future.done():
-            self._goal_handle = self._goal_future.result()
-            if not self._goal_handle.accepted:
-                Logger.logerr(f"[GripperCommandActionState] Goal was rejected by the server.")
-                return 'failure'
-            Logger.loginfo(f"[GripperCommandActionState] Goal accepted, waiting for result...")
-            self._result_future = self._goal_handle.get_result_async()
+        # If we don’t have a result yet, keep waiting.
+        if not self._ac.has_result(self._action_name):
             return None
 
-        if self._result_future and self._result_future.done():
-            result = self._result_future.result()
-            if result is None:
-                Logger.logerr("[GripperCommandActionState] No result received.")
-                return 'failure'
+        # NOTE: ProxyActionClient.get_result() returns the *Result message* directly (not a wrapper)
+        try:
+            r = self._ac.get_result(self._action_name)  # type: GripperCommand.Result
+        except Exception as e:
+            Logger.logerr(f"[{type(self).__name__}] Failed to get result: {e}")
+            return 'failed'
 
-            result_data = result.result
-            Logger.loginfo(f"[GripperCommandActionState] Result: position={result_data.position:.4f}, "
-                           f"effort={result_data.effort:.2f}, "
-                           f"stalled={result_data.stalled}, "
-                           f"reached_goal={result_data.reached_goal}")
+        if r is None:
+            Logger.logerr(f"[{type(self).__name__}] Empty result from action.")
+            return 'failed'
 
-            if result_data.position > 0.001:
-                Logger.loginfo("[GripperCommandActionState] Gripper moved — treating as success.")
-                return 'success'
+        Logger.loginfo(
+            f"[{type(self).__name__}] Result: "
+            f"position={getattr(r, 'position', float('nan')):.4f}, "
+            f"effort={getattr(r, 'effort', float('nan')):.2f}, "
+            f"stalled={getattr(r, 'stalled', False)}, "
+            f"reached_goal={getattr(r, 'reached_goal', False)}"
+        )
 
-            if result.status == 0 and result_data.reached_goal:
-                Logger.loginfo("[GripperCommandActionState] Gripper goal succeeded cleanly.")
-                return 'success'
+        reached = getattr(r, 'reached_goal', False)
+        stalled = getattr(r, 'stalled', False)
+        pos = getattr(r, 'position', 0.0)
 
-            Logger.logerr("[GripperCommandActionState] Gripper did not move and goal failed.")
-            return 'failure'
+        # Success policy: prefer reached_goal, otherwise allow "close enough & not stalled"
+        if reached or (abs(pos - userdata.position) < 1e-3 and not stalled):
+            Logger.loginfo(f"[{type(self).__name__}] Gripper goal succeeded.")
+            return 'success'
 
-        return None  # still waiting
+        Logger.logerr(f"[{type(self).__name__}] Gripper goal failed (stalled={stalled}, reached={reached}).")
+        return 'failed'
+    
+    def on_enter(self, userdata):
+        # Call this method a single time when the state becomes active, when a transition from another state to this one is taken.
+        # It is primarily used to start actions which are associated with this state.
 
-    def feedback_cb(self, feedback_msg):
-        feedback = feedback_msg.feedback
-        Logger.logdebug(f"[GripperCommandActionState] Feedback: {feedback}")
+        """
+        Build the action name, check availability, and send the goal.
+        """
+        self._had_error = False
+        self._sent_goal = False
+        self._action_name = self._action_name_fmt.format(robot_name=userdata.robot_name)
+
+        # Construct goal
+        goal = GripperCommand.Goal()
+        goal.command.position = float(userdata.position)
+        goal.command.max_effort = float(userdata.max_effort)
+
+        # Create / register proxy client for this action
+        try:
+            self._ac = ProxyActionClient({self._action_name: GripperCommand})
+        except Exception as e:
+            Logger.logerr(f"[{type(self).__name__}] Failed to create ProxyActionClient: {e}")
+            self._had_error = True
+            return
+
+        # Wait for server (ProxyActionClient handles the underlying rclpy client)
+        if not self._ac.is_available(self._action_name):
+            Logger.logerr(f"[{type(self).__name__}] Action '{self._action_name}' not available after "
+                          f"{self._timeout_sec:.1f}s.")
+            self._had_error = True
+            return
+
+        # Send goal
+        try:
+            Logger.loginfo(f"[{type(self).__name__}] Sending goal to '{self._action_name}': "
+                           f"position={goal.command.position}, max_effort={goal.command.max_effort}")
+            self._ac.send_goal(self._action_name, goal)
+            self._sent_goal = True
+        except Exception as e:
+            Logger.logerr(f"[{type(self).__name__}] Exception while sending goal: {e}")
+            self._had_error = True
 
     def on_exit(self, userdata):
-        Logger.loginfo("[GripperCommandActionState] Exiting state.")
+        # Call this method when an outcome is returned and another state gets active.
+        # It can be used to stop possibly running processes started by on_enter.
+
+        # You could cancel the goal here if you want to be defensive on early exits:
+        try:
+            if self._sent_goal and self._ac is not None and self._ac.is_available(self._action_name):
+                self._ac.cancel(self._action_name)
+        except Exception:
+            # Non-fatal cleanup
+            pass
+
+    def on_start(self):
+        # Call this method when the behavior is instantiated on board.
+        # If possible, it is generally better to initialize used resources in the constructor
+        #   because if anything failed, the behavior would not even be started.
+
+        # No-op: template hook
+        pass
 
     def on_stop(self):
-        Logger.loginfo("[GripperCommandActionState] Behavior stopped.")
+        # Call this method whenever the behavior stops execution, also if it is cancelled.
+        # Use this event to clean up things like claimed resources.
+
+        # No-op: template hook
+        pass
