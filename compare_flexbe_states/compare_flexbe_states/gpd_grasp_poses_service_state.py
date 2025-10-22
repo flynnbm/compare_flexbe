@@ -74,11 +74,12 @@ class GPDGraspPosesServiceState(EventState):
             # Keep the raw lists if you still want them
             userdata.grasp_target_poses = self._res.target_poses
             userdata.grasp_approach_poses = self._res.approach_poses
+            userdata.grasp_retreat_poses = self._res.retreat_poses
 
             # Build list-of-sets: [[approach0, target0], [approach1, target1], ...]
             # zip() will truncate to the shorter list if lengths differ.
             userdata.grasp_waypoints = [
-                [a, t] for a, t in zip(self._res.approach_poses, self._res.target_poses)
+                [a, t, r] for a, t, r in zip(self._res.approach_poses, self._res.target_poses, self._res.retreat_poses)
             ]
             Logger.loginfo(f"[{type(self).__name__}] Received grasp poses list with {len(self._res.target_poses)} poses.")
         except Exception as e:
