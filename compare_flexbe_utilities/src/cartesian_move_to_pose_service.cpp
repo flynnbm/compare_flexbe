@@ -36,20 +36,17 @@ private:
     const std::shared_ptr<compare_flexbe_utilities::srv::CartesianMoveToPose::Request> req,
     std::shared_ptr<compare_flexbe_utilities::srv::CartesianMoveToPose::Response> res)
   {
-    // double jump_threshold = this->get_parameter("jump_threshold").as_double();
     double eef_step = this->get_parameter("eef_step").as_double();
-    // move_group_interface_->setPoseReferenceFrame("panda_link0");
-    // move_group_interface_->setStartStateToCurrentState();
 
     std::vector<geometry_msgs::msg::Pose> waypoints;
+    waypoints.reserve(1 + req->waypoints.size());
+
+    if (req->waypoints.empty()) {
+      RCLCPP_WARN(this->get_logger(), "No target waypoints provided; only current pose present.");
+    }
+
     waypoints.push_back(move_group_interface_->getCurrentPose().pose);
     waypoints.insert(waypoints.end(), req->waypoints.begin(), req->waypoints.end());
-
-    // debugging messages
-    // RCLCPP_INFO(this->get_logger(), "Planning frame: %s | EEF: %s | Group: %s",
-    //           move_group_interface_->getPlanningFrame().c_str(),
-    //           move_group_interface_->getEndEffectorLink().c_str(),
-    //           move_group_interface_->getName().c_str());
 
     moveit_msgs::msg::RobotTrajectory trajectory;
     double fraction = move_group_interface_->computeCartesianPath(
