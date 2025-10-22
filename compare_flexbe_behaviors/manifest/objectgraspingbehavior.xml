@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<behavior name="ObjectGraspingBehavior">
+
+    <executable package_path="compare_flexbe_behaviors.objectgraspingbehavior_sm" class="ObjectGraspingBehaviorSM" />
+    <tagstring></tagstring>
+    <author>Brian Flynn</author>
+    <date>Sat Oct 18 2025</date>
+    <description>
+        sub-behavior for approach -> grasp -> retreat objective
+    </description>
+
+
+    <!-- Contained Behaviors -->
+
+    <!-- Available Parameters -->
+
+</behavior>
