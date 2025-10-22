@@ -63,11 +63,10 @@ class MoveToPoseServiceState(EventState):
 
         try:
             Logger.loginfo(f"[{type(self).__name__}] Finished plan with result: {self._res.success}.")
-            userdata.grasp_index += 1
             if self._res.success == 1 :
                 return 'done'
             if (userdata.grasp_index + 1) < len(userdata.grasp_poses):
-                userdata.grasp_index = userdata.grasp_index + 1
+                userdata.grasp_index += 1
                 return 'next'
             else:
                 # This was the last set of waypoints
