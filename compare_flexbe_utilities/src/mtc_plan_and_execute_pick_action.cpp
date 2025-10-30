@@ -36,24 +36,24 @@ public:
   : rclcpp::Node("mtc_plan_and_execute_node", opts)
   {
     // Separate callback group so we can run planning/execution without blocking other callbacks
-    cbg_exec_ = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+    // cbg_exec_ = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
-    rclcpp_action::ServerOptions as_opts;
-    as_opts.callback_group = cbg_exec_;
+    // rclcpp_action::ServerOptions as_opts;
+    // as_opts.callback_group = cbg_exec_;
 
     action_server_ = rclcpp_action::create_server<PlanAndExecute>(
-    this,
-    "mtc_plan_and_execute_pick",
-    std::bind(&MtcPlanAndExecuteNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-    std::bind(&MtcPlanAndExecuteNode::handle_cancel, this, std::placeholders::_1),
-    std::bind(&MtcPlanAndExecuteNode::handle_accepted, this, std::placeholders::_1),
-    as_opts);
+      this,
+      "mtc_plan_and_execute_pick",
+      std::bind(&MtcPlanAndExecuteNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+      std::bind(&MtcPlanAndExecuteNode::handle_cancel, this, std::placeholders::_1),
+      std::bind(&MtcPlanAndExecuteNode::handle_accepted, this, std::placeholders::_1)
+    );
 
     RCLCPP_INFO(get_logger(), "MTC Plan+Execute action server ready.");
   }
 
 private:
-  rclcpp::CallbackGroup::SharedPtr cbg_exec_;
+  // rclcpp::CallbackGroup::SharedPtr cbg_exec_;
   rclcpp_action::Server<PlanAndExecute>::SharedPtr action_server_;
 
   // ---- Action handlers ----
@@ -84,12 +84,13 @@ private:
     PlanAndExecute::Feedback feedback;
     PlanAndExecute::Result result;
 
-    auto send_feedback = [&](const std::string& phase, const std::string& stage, float prog){
-        auto fb = std::make_shared<PlanAndExecute::Feedback>();
-        fb->phase = phase;
-        fb->stage_name = stage;
-        fb->stage_progress = prog;
-        goal_handle->publish_feedback(fb);
+    auto send_feedback = [&](const std::string& phase,
+                         const std::string& stage, float prog){
+      auto fb = std::make_shared<PlanAndExecute::Feedback>();
+      fb->phase = phase;
+      fb->stage_name = stage;
+      fb->stage_progress = prog;
+      goal_handle->publish_feedback(fb);
     };
 
     // Build task
@@ -107,16 +108,12 @@ private:
 
     // Solvers
     auto ptp = std::make_shared<solvers::PipelinePlanner>(shared_from_this());
-    if (!goal->pipeline_id.empty())
-      ptp->setPipelineId(goal->pipeline_id);
-
     auto cart = std::make_shared<solvers::CartesianPath>();
+    auto hand = std::make_shared<solvers::JointInterpolationPlanner>();
+
     cart->setStepSize(goal->cart_step_size > 0.f ? goal->cart_step_size : 0.005);
     cart->setMaxVelocityScalingFactor(goal->vel_scale > 0.f ? goal->vel_scale : 0.6);
     cart->setMaxAccelerationScalingFactor(goal->acc_scale > 0.f ? goal->acc_scale : 0.6);
-    cart->setJumpThreshold(10.0); // tune as needed
-
-    auto hand = std::make_shared<solvers::JointInterpolation>();
 
     const std::string arm_group   = goal->arm_group.empty()   ? "arm"   : goal->arm_group;
     const std::string hand_group  = goal->hand_group.empty()  ? "hand"  : goal->hand_group;
@@ -197,64 +194,49 @@ private:
 
     moveit::core::MoveItErrorCode plan_ec;
     try {
-    plan_ec = task.plan(1);  // returns MoveItErrorCode on Jazzy
+      plan_ec = task.plan(1);
     } catch (const std::exception& e) {
-    result.success = false; result.error_code = 11;
-    result.message = std::string("Planning threw: ") + e.what();
-    goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
-    return;
+      result.success = false; result.error_code = 11;
+      result.message = std::string("Planning threw: ") + e.what();
+      goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
+      return;
     }
     if (plan_ec != moveit::core::MoveItErrorCode::SUCCESS || task.solutions().empty()) {
-    result.success = false; result.error_code = 12;
-    result.message = "Planning failed: no solutions.";
-    goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
-    return;
+      result.success = false; result.error_code = 12;
+      result.message = "Planning failed: no solutions.";
+      goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
+      return;
     }
 
     // Allow cancel after planning, before motion
     if (goal_handle->is_canceling()) {
-    result.success = false; result.error_code = 20;
-    result.message = "Canceled before execution.";
-    goal_handle->canceled(std::make_shared<PlanAndExecute::Result>(result));
-    return;
+      result.success = false; result.error_code = 20;
+      result.message = "Canceled before execution.";
+      goal_handle->canceled(std::make_shared<PlanAndExecute::Result>(result));
+      return;
     }
 
-    // --- Execute with coarse feedback; poll cancel between segments ---
+    // Execute (coarse feedback)
     send_feedback("executing", "starting", 0.0f);
 
-    bool ok = false;
+    moveit::core::MoveItErrorCode exec_ec;
     try {
-    // NOTE: solutions() is an ordered container; use front() instead of operator[]
-    auto solution = task.solutions().front();
-    const size_t N = solution->numChildren();  // number of SubTrajectories
-
-    for (size_t i = 0; i < N; ++i) {
-        if (goal_handle->is_canceling()) {
-        send_feedback("canceling", "requested", 1.0f);
-        result.success = false; result.error_code = 21;
-        result.message = "Execution canceled.";
-        goal_handle->canceled(std::make_shared<PlanAndExecute::Result>(result));
-        return;
-        }
-        auto child = solution->child(i);
-        const std::string stage_name =
-            (child && !child->comment().empty()) ? child->comment() : ("stage_" + std::to_string(i));
-        send_feedback("executing", stage_name, (N ? static_cast<float>(i) / static_cast<float>(N) : 0.0f));
-    }
-
-    ok = task.execute(*solution);
+      auto solution = task.solutions().front();   // get first solution
+      // Optional: publish a mid-progress tick
+      send_feedback("executing", "running", 0.5f);
+      exec_ec = task.execute(*solution);
     } catch (const std::exception& e) {
-    result.success = false; result.error_code = 22;
-    result.message = std::string("Execution threw: ") + e.what();
-    goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
-    return;
+      result.success = false; result.error_code = 22;
+      result.message = std::string("Execution threw: ") + e.what();
+      goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
+      return;
     }
 
-    if (!ok) {
-    result.success = false; result.error_code = 23;
-    result.message = "Execution failed.";
-    goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
-    return;
+    if (exec_ec != moveit::core::MoveItErrorCode::SUCCESS) {
+      result.success = false; result.error_code = 23;
+      result.message = "Execution failed.";
+      goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
+      return;
     }
 
     send_feedback("executing", "done", 1.0f);
