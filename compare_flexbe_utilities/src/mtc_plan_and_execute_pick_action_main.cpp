@@ -1,5 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
-#include "mtc_plan_and_execute_pick_and_place_action.hpp"
+#include "compare_flexbe_utilities/mtc_plan_and_execute_pick_action.hpp"
 
 int main(int argc, char** argv) {
   rclcpp::init(argc, argv);
