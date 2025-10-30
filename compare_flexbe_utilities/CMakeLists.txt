@@ -155,11 +155,11 @@ ament_target_dependencies(filter_by_indices_service
 )
 target_link_libraries(filter_by_indices_service ${PCL_LIBRARIES})
 
-add_executable(mtc_plan_and_execute_pick_action_main  src/mtc_plan_and_execute_pick_action_main.cpp)
-ament_target_dependencies(mtc_plan_and_execute_pick_action_main
-  rclcpp
-)
-target_link_libraries(mtc_plan_and_execute_pick_action_main mtc_plan_and_execute_pick_action_node)
+# add_executable(mtc_plan_and_execute_pick_action_main  src/mtc_plan_and_execute_pick_action_main.cpp)
+# ament_target_dependencies(mtc_plan_and_execute_pick_action_main
+#   rclcpp
+# )
+# target_link_libraries(mtc_plan_and_execute_pick_action_main mtc_plan_and_execute_pick_action_node)
 
 install(TARGETS 
   cartesian_move_to_pose_service
@@ -171,7 +171,7 @@ install(TARGETS
   get_point_cloud_service
   filter_by_indices_service
   mtc_plan_and_execute_pick_action_node
-  mtc_plan_and_execute_pick_action_main
+  # mtc_plan_and_execute_pick_action_main
   DESTINATION lib/${PROJECT_NAME})
 
 # Link generated service headers
@@ -185,7 +185,7 @@ target_link_libraries(euclidean_clustering_service ${cpp_typesupport_target})
 target_link_libraries(get_point_cloud_service ${cpp_typesupport_target})
 target_link_libraries(filter_by_indices_service ${cpp_typesupport_target})
 target_link_libraries(mtc_plan_and_execute_pick_action_node ${cpp_typesupport_target})
-target_link_libraries(mtc_plan_and_execute_pick_action_main ${cpp_typesupport_target})
+# target_link_libraries(mtc_plan_and_execute_pick_action_main ${cpp_typesupport_target})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
