@@ -48,7 +48,7 @@ class GPDGraspPosesServiceState(EventState):
 
         super().__init__(outcomes=['done', 'failed'],
                             input_keys=['grasp_configs'],
-                            output_keys=['grasp_target_poses', 'grasp_approach_poses', 'grasp_waypoints']
+                            output_keys=['grasp_target_poses', 'grasp_approach_poses', 'grasp_retreat_poses', 'grasp_waypoints']
         )
         self._service_name = service_name
         self._service_timeout = service_timeout
