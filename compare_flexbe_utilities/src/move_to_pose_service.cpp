@@ -24,12 +24,14 @@ public:
       std::bind(&PosePlanner::handle_request, this, std::placeholders::_1, std::placeholders::_2)
     );
 
+    marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("debug_goal_marker", 1);
     RCLCPP_INFO(this->get_logger(), "MoveToPose service ready (group: %s)", group_name.c_str());
   }
 
 private:
   rclcpp::Service<compare_flexbe_utilities::srv::MoveToPose>::SharedPtr service_;
   std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
 
   void handle_request(
     const std::shared_ptr<compare_flexbe_utilities::srv::MoveToPose::Request> req,
@@ -37,24 +39,37 @@ private:
   {
     try
     {
-      move_group_->setPoseTarget(req->target_pose);
-  
-      auto marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("debug_goal_marker", 1);
+      const std::string planning_frame = move_group_->getPlanningFrame();
+      move_group_->setPoseReferenceFrame(planning_frame);
 
+      // (Optional but helpful)
+      move_group_->setStartStateToCurrentState();
+
+      // Log the raw pose numbers
+      const auto& p = req->target_pose.pose.position;
+      RCLCPP_INFO(get_logger(), "Target (interpreted in %s) x=%.3f y=%.3f z=%.3f",
+                  planning_frame.c_str(), p.x, p.y, p.z);
+
+      // Publish the marker (bigger scale so it’s obvious)
       visualization_msgs::msg::Marker m;
-      m.header.stamp = this->now();
-      m.header.frame_id = "simple_pedestal";
+      m.header.stamp = now();
+      m.header.frame_id = planning_frame;
       m.ns = "move_to_pose_goal";
       m.id = 0;
       m.type = visualization_msgs::msg::Marker::SPHERE;
       m.action = visualization_msgs::msg::Marker::ADD;
-      m.pose = req->target_pose;              // exactly what you're planning to
+      m.pose = req->target_pose.pose;
       m.scale.x = m.scale.y = m.scale.z = 0.03;
       m.color.a = 1.0; m.color.r = 0.1; m.color.g = 0.8; m.color.b = 0.2;
       marker_pub_->publish(m);
 
+      move_group_->setPoseTarget(req->target_pose);
+
       moveit::planning_interface::MoveGroupInterface::Plan plan;
-      moveit::core::MoveItErrorCode planning_result = move_group_->plan(plan);
+      move_group_->setPlanningTime(3.0);
+      move_group_->setGoalTolerance(1e-3);
+      move_group_->setGoalOrientationTolerance(0.15); // temporarily relaxed
+      auto planning_result = move_group_->plan(plan);
   
       if (planning_result != moveit::core::MoveItErrorCode::SUCCESS)
       {
