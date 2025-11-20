@@ -46,9 +46,11 @@ class GripperCommandActionState(EventState):
         self._ac = None
 
     def execute(self, userdata):
-        """
-        Poll for result and decide outcome.
-        """
+        # Execute this method periodically while the state is active.
+        # Main purpose is to check state conditions and trigger a corresponding outcome.
+        # If no outcome is returned, the state will stay active.
+
+        # Check for error or no response
         if self._had_error or not self._sent_goal:
             return 'failed'
 
@@ -91,9 +93,6 @@ class GripperCommandActionState(EventState):
         # Call this method a single time when the state becomes active, when a transition from another state to this one is taken.
         # It is primarily used to start actions which are associated with this state.
 
-        """
-        Build the action name, check availability, and send the goal.
-        """
         self._had_error = False
         self._sent_goal = False
         self._action_name = self._action_name_fmt.format(robot_name=userdata.robot_name)
