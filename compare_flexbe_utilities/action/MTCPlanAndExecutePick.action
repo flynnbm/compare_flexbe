@@ -10,7 +10,7 @@ float32 vel_scale         # default 0.6
 float32 acc_scale         # default 0.6
 string arm_group          # default "arm"
 string hand_group         # default "hand"
-string eef_link           # default "tool0"
+string eef                # default "tool0"
 string ik_frame           # default "tool0"
 string open_named_state   # default "open"
 string close_named_state  # default "close"

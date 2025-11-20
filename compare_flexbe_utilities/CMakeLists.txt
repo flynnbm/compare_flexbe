@@ -52,31 +52,6 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
 )
 
-# Component library for the MTC action server
-add_library(mtc_plan_and_execute_pick_action_node SHARED
-  src/mtc_plan_and_execute_pick_action.cpp
-)
-target_include_directories(mtc_plan_and_execute_pick_action_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-ament_target_dependencies(mtc_plan_and_execute_pick_action_node
-  rclcpp
-  rclcpp_action
-  rclcpp_components
-  geometry_msgs
-  moveit_core
-  moveit_task_constructor_core
-  moveit_task_constructor_msgs
-  moveit_ros_planning_interface
-)
-
-# Register the component (plugin string must match your C++ namespace::Class)
-rclcpp_components_register_nodes(
-  mtc_plan_and_execute_pick_action_node
-  "compare_flexbe_utilities::MtcPlanAndExecutePickActionNode"
-)
-
 # Create executable
 add_executable(cartesian_move_to_pose_service src/cartesian_move_to_pose_service.cpp)
 ament_target_dependencies(cartesian_move_to_pose_service
@@ -155,11 +130,16 @@ ament_target_dependencies(filter_by_indices_service
 )
 target_link_libraries(filter_by_indices_service ${PCL_LIBRARIES})
 
-# add_executable(mtc_plan_and_execute_pick_action_main  src/mtc_plan_and_execute_pick_action_main.cpp)
-# ament_target_dependencies(mtc_plan_and_execute_pick_action_main
-#   rclcpp
-# )
-# target_link_libraries(mtc_plan_and_execute_pick_action_main mtc_plan_and_execute_pick_action_node)
+add_executable(mtc_plan_and_execute_pick_action src/mtc_plan_and_execute_pick_action.cpp)
+ament_target_dependencies(mtc_plan_and_execute_pick_action
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  moveit_core
+  moveit_task_constructor_core
+  moveit_task_constructor_msgs
+  moveit_ros_planning_interface
+)
 
 install(TARGETS 
   cartesian_move_to_pose_service
@@ -170,8 +150,7 @@ install(TARGETS
   euclidean_clustering_service
   get_point_cloud_service
   filter_by_indices_service
-  mtc_plan_and_execute_pick_action_node
-  # mtc_plan_and_execute_pick_action_main
+  mtc_plan_and_execute_pick_action
   DESTINATION lib/${PROJECT_NAME})
 
 # Link generated service headers
@@ -184,8 +163,7 @@ target_link_libraries(plane_segmentation_service ${cpp_typesupport_target})
 target_link_libraries(euclidean_clustering_service ${cpp_typesupport_target})
 target_link_libraries(get_point_cloud_service ${cpp_typesupport_target})
 target_link_libraries(filter_by_indices_service ${cpp_typesupport_target})
-target_link_libraries(mtc_plan_and_execute_pick_action_node ${cpp_typesupport_target})
-# target_link_libraries(mtc_plan_and_execute_pick_action_main ${cpp_typesupport_target})
+target_link_libraries(mtc_plan_and_execute_pick_action ${cpp_typesupport_target})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

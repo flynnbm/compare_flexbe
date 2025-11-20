@@ -1,19 +1,51 @@
+#include <sstream>
+
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
-#include <rclcpp_components/register_node_macro.hpp>
 
+// tf
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+
+// MoveIt
+#include <moveit/planning_scene/planning_scene.hpp>
+#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
+
+// MTC 
 #include <moveit/task_constructor/task.h>
-
-// stages
-#include <moveit/task_constructor/stages/current_state.h>
-#include <moveit/task_constructor/stages/move_to.h>
 #include <moveit/task_constructor/stages/compute_ik.h>
+#include <moveit/task_constructor/stages/connect.h>
+#include <moveit/task_constructor/stages/current_state.h>
+#include <moveit/task_constructor/stages/generate_grasp_pose.h>
+#include <moveit/task_constructor/stages/generate_pose.h>
+#include <moveit/task_constructor/stages/generate_place_pose.h>
 #include <moveit/task_constructor/stages/modify_planning_scene.h>
-
-// solvers
-#include <moveit/task_constructor/solvers/pipeline_planner.h>
+#include <moveit/task_constructor/stages/move_relative.h>
+#include <moveit/task_constructor/stages/move_to.h>
+#include <moveit/task_constructor/stages/predicate_filter.h>
 #include <moveit/task_constructor/solvers/cartesian_path.h>
+#include <moveit/task_constructor/solvers/pipeline_planner.h>
 #include <moveit/task_constructor/solvers/joint_interpolation.h>
+
+// // MTC
+// #include <moveit/planning_scene/planning_scene.hpp>
+// #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
+// #include <moveit/task_constructor/task.h>
+// #include <moveit/task_constructor/solvers.h>
+// #include <moveit/task_constructor/stages.h>
+
+// // stages
+// #include <moveit/task_constructor/task.h>
+// #include <moveit/task_constructor/stages/current_state.h>
+// #include <moveit/task_constructor/stages/move_to.h>
+// #include <moveit/task_constructor/stages/compute_ik.h>
+// #include <moveit/task_constructor/stages/modify_planning_scene.h>
+
+// // solvers
+// #include <moveit/task_constructor/solvers/pipeline_planner.h>
+// #include <moveit/task_constructor/solvers/cartesian_path.h>
+// #include <moveit/task_constructor/solvers/joint_interpolation.h>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <compare_flexbe_utilities/action/mtc_plan_and_execute_pick.hpp>
@@ -25,67 +57,57 @@ namespace solvers = mtc::solvers;
 namespace compare_flexbe_utilities {
 
 using PlanAndExecute = compare_flexbe_utilities::action::MTCPlanAndExecutePick;
-using GoalHandle = rclcpp_action::ServerGoalHandle<PlanAndExecute>;
-using moveit::task_constructor::Task;
-namespace stages = moveit::task_constructor::stages;
-namespace solvers = moveit::task_constructor::solvers;
+using GoalHandle     = rclcpp_action::ServerGoalHandle<PlanAndExecute>;
 
-class MtcPlanAndExecuteNode : public rclcpp::Node {
+class MtcPlanAndExecutePickActionNode : public rclcpp::Node {
 public:
-  explicit MtcPlanAndExecuteNode(const rclcpp::NodeOptions& opts)
-  : rclcpp::Node("mtc_plan_and_execute_node", opts)
+  explicit MtcPlanAndExecutePickActionNode()
+  : rclcpp::Node("mtc_plan_and_execute_node")
   {
-    // Separate callback group so we can run planning/execution without blocking other callbacks
-    // cbg_exec_ = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
-
-    // rclcpp_action::ServerOptions as_opts;
-    // as_opts.callback_group = cbg_exec_;
-
     action_server_ = rclcpp_action::create_server<PlanAndExecute>(
       this,
       "mtc_plan_and_execute_pick",
-      std::bind(&MtcPlanAndExecuteNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-      std::bind(&MtcPlanAndExecuteNode::handle_cancel, this, std::placeholders::_1),
-      std::bind(&MtcPlanAndExecuteNode::handle_accepted, this, std::placeholders::_1)
+      std::bind(&MtcPlanAndExecutePickActionNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+      std::bind(&MtcPlanAndExecutePickActionNode::handle_cancel, this, std::placeholders::_1),
+      std::bind(&MtcPlanAndExecutePickActionNode::handle_accepted, this, std::placeholders::_1)
     );
 
     RCLCPP_INFO(get_logger(), "MTC Plan+Execute action server ready.");
+    tf_buffer_   = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   }
 
 private:
-  // rclcpp::CallbackGroup::SharedPtr cbg_exec_;
+  moveit::task_constructor::TaskPtr task_;
   rclcpp_action::Server<PlanAndExecute>::SharedPtr action_server_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
-  // ---- Action handlers ----
   rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID&,
-                                          std::shared_ptr<const PlanAndExecute::Goal> goal)
+                                          std::shared_ptr<const PlanAndExecute::Goal>)
   {
-    (void)goal;
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
 
-  rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandle> goal_handle)
+  rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandle> /*goal_handle*/)
   {
     RCLCPP_WARN(get_logger(), "Cancel requested.");
-    (void)goal_handle;
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
   void handle_accepted(const std::shared_ptr<GoalHandle> goal_handle)
   {
-    // Run in a separate thread so the callback returns immediately (multi-threaded executor will pick it up)
+    // Detach a worker thread; MultiThreadedExecutor will let callbacks run concurrently
     std::thread([this, goal_handle](){ this->execute_goal(goal_handle); }).detach();
   }
 
-  // ---- Core execution ----
   void execute_goal(const std::shared_ptr<GoalHandle> goal_handle)
   {
     auto goal = goal_handle->get_goal();
-    PlanAndExecute::Feedback feedback;
     PlanAndExecute::Result result;
 
     auto send_feedback = [&](const std::string& phase,
-                         const std::string& stage, float prog){
+                             const std::string& stage, float prog){
       auto fb = std::make_shared<PlanAndExecute::Feedback>();
       fb->phase = phase;
       fb->stage_name = stage;
@@ -93,108 +115,183 @@ private:
       goal_handle->publish_feedback(fb);
     };
 
-    // Build task
-    send_feedback("planning", "", 0.0f);
+    // BEFORE constructing stages:
+    auto approach_pose  = goal->approach;
+    auto grasp_pose     = goal->grasp;
+    auto retreat_pose   = goal->retreat;
 
-    Task task("pick_task");
+    // =================== Debug Logging ================================================================================
+    // Print out expected grasp pose for debugging
+    RCLCPP_INFO(get_logger(),
+      "Grasp in %s: pos [%.3f %.3f %.3f] quat [%.3f %.3f %.3f %.3f]",
+      grasp_pose.header.frame_id.c_str(),
+      grasp_pose.pose.position.x, grasp_pose.pose.position.y, grasp_pose.pose.position.z,
+      grasp_pose.pose.orientation.x, grasp_pose.pose.orientation.y,
+      grasp_pose.pose.orientation.z, grasp_pose.pose.orientation.w);
+    // =================== Debug Logging ================================================================================
+
+    // Group (Arm/Hand) Params
+    const std::string arm_group   = goal->arm_group.empty()   ? "panda_arm"   : goal->arm_group;
+    const std::string hand_group  = goal->hand_group.empty()  ? "panda_hand"  : goal->hand_group;
+    const std::string eef         = goal->eef.empty()         ? "panda_link8" : goal->eef;
+    const std::string ik_frame    = goal->ik_frame.empty()    ? "panda_link8" : goal->ik_frame;
+    const std::string open_state  = goal->open_named_state.empty()  ? "open"  : goal->open_named_state;
+    const std::string close_state = goal->close_named_state.empty() ? "close" : goal->close_named_state;
+
+    // Reset ROS introspection before constructing the new object
+    task_.reset();
+    task_.reset(new moveit::task_constructor::Task());
+
+    // Setup task
+    moveit::task_constructor::Task& task = *task_;
+    task.stages()->setName("pick_and_place");
+    task.loadRobotModel(shared_from_this());
+
+    // Set task properties
+    task.setProperty("group", arm_group);                 // panda_arm
+    task.setProperty("eef", eef);                         // panda_link8
+    task.setProperty("hand", hand_group);                    // panda_hand
+	  task.setProperty("hand_grasping_frame", hand_group);     // panda_hand <- same as hand_frame in tutorials example
+    task.setProperty("ik_frame", ik_frame);               // panda_link8
+
+    // Solvers
+    auto sampling_planner  = std::make_shared<solvers::PipelinePlanner>(shared_from_this());
+    auto cartesian_planner = std::make_shared<solvers::CartesianPath>();
+    auto interpolation_planner = std::make_shared<solvers::JointInterpolationPlanner>();
+
+    // Specify sampling_planner params
+    sampling_planner->setProperty("goal_joint_tolerance", 1e-5);
+
+    // Specify cartesian planner params
+    cartesian_planner->setMaxVelocityScalingFactor(goal->vel_scale > 0.f ? goal->vel_scale : 1.0);
+    cartesian_planner->setMaxAccelerationScalingFactor(goal->acc_scale > 0.f ? goal->acc_scale : 1.0);
+    cartesian_planner->setStepSize(goal->cart_step_size > 0.f ? goal->cart_step_size : 0.01);
+
+    moveit::task_constructor::Stage* current_state_ptr = nullptr;
+    moveit::task_constructor::Stage* initial_state_ptr = nullptr;
+
+    /****************************************************
+     *                                                  *
+     *               Current State                      *
+     *                                                  *
+     ***************************************************/    
+    // Create a "current state" stage
+    {
+      auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
+      current_state_ptr = stage_state_current.get();
+      task.add(std::move(stage_state_current));
+    }
+
+    /****************************************************
+     *                                                  *
+     *               Open Hand                          *
+     *                                                  *
+     ***************************************************/
+    // Create a MoveTo stage to open the hand using the interpolation planner
+    {
+      auto stage_open_hand =
+        std::make_unique<mtc::stages::MoveTo>("open hand", interpolation_planner);
+      stage_open_hand->setGroup(hand_group);
+      stage_open_hand->setGoal("open");
+      initial_state_ptr = stage_open_hand.get();  // remember start state for monitoring grasp pose generator
+      task.add(std::move(stage_open_hand));
+    }
+
+    /****************************************************
+     *                                                  *
+     *               Pick Object                        *
+     *                                                  *
+     ***************************************************/
+    // Create a serial container to hold picking substages
+    { // ======== START Pick SerialContainer ========
+      auto grasp = std::make_unique<mtc::SerialContainer>("pick object");
+      task.properties().exposeTo(grasp->properties(), { "eef", "hand", "group", "ik_frame" });
+      grasp->properties().configureInitFrom(mtc::Stage::PARENT, { "eef", "hand", "group", "ik_frame" });
+
+      /****************************************************
+       *               Move to *Pregrasp*                 *
+       ***************************************************/
+      // Simple MoveTo stage to go to pregrasp pose
+      {
+        auto move_to_pregrasp =
+          std::make_unique<mtc::stages::MoveTo>("move to pregrasp", sampling_planner);
+        move_to_pregrasp->setGroup(arm_group);
+        move_to_pregrasp->setGoal(approach_pose);  // PoseStamped overload
+        grasp->insert(std::move(move_to_pregrasp));
+      }
+
+      /****************************************************
+       *               Move to *Grasp*                    *
+       ***************************************************/
+      // Simple MoveTo stage to go to SRDF named target "ready"
+      {
+        auto move_to_grasp =
+          std::make_unique<mtc::stages::MoveTo>("move arm to ready", sampling_planner);
+        move_to_grasp->setGroup(arm_group);
+        move_to_grasp->setGoal(grasp_pose);
+        grasp->insert(std::move(move_to_grasp));
+      }
+
+      /****************************************************
+       *                 Close Hand                       *
+       ***************************************************/
+      // Use a MoveTo stage to close the hand
+      {
+        auto stage =std::make_unique<mtc::stages::MoveTo>("close hand", sampling_planner);
+        stage->setGroup(hand_group);
+        stage->setGoal("close");
+        grasp->insert(std::move(stage));
+      }
+
+      /****************************************************
+       *                 Lift Object                      *
+       ***************************************************/
+      // Retreat from the object with a MoveRelative stage using the cartesian planner
+      {
+        auto stage =
+            std::make_unique<mtc::stages::MoveRelative>("lift object", cartesian_planner);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, { "group" });
+        stage->setMinMaxDistance(0.05, 0.075);
+        stage->setIKFrame("panda_link8");
+        stage->properties().set("marker_ns", "lift_object");
+
+        // Set upward direction
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = "panda_link0";
+        vec.vector.z = 1.0;
+        stage->setDirection(vec);
+        grasp->insert(std::move(stage));
+      }
+    
+      // ======== Add the serial container, with all of its substages, to the task ========
+      task.add(std::move(grasp));
+    } // ======== END Pick SerialContainer ========
+
+    // --- Initialize ---
+    RCLCPP_INFO(get_logger(), "[MTC pick_and_place] init()");
     try {
-      task.loadRobotModel(shared_from_this()); // allow parameters to flow in
-    } catch (const std::exception& e) {
-      result.success = false; result.error_code = 10;
-      result.message = std::string("RobotModel load failed: ") + e.what();
+      task.init();
+      RCLCPP_INFO(get_logger(), "[MTC pick_and_place] init() OK");
+    } catch (mtc::InitStageException& e) {
+      RCLCPP_ERROR(get_logger(), "[MTC pick_and_place] init() FAILED: %s", e.what());
+      std::stringstream ss;
+      ss << "Init failed in debug_generate_pose:\n" << e;
+      RCLCPP_ERROR_STREAM(get_logger(), ss.str());
+      PlanAndExecute::Result result;
+      result.success = false; result.error_code = 11;
+      result.message = std::string("Stage init failed: ") + e.what();
       goal_handle->abort(std::make_shared<PlanAndExecute::Result>(result));
       return;
     }
 
-    // Solvers
-    auto ptp = std::make_shared<solvers::PipelinePlanner>(shared_from_this());
-    auto cart = std::make_shared<solvers::CartesianPath>();
-    auto hand = std::make_shared<solvers::JointInterpolationPlanner>();
-
-    cart->setStepSize(goal->cart_step_size > 0.f ? goal->cart_step_size : 0.005);
-    cart->setMaxVelocityScalingFactor(goal->vel_scale > 0.f ? goal->vel_scale : 0.6);
-    cart->setMaxAccelerationScalingFactor(goal->acc_scale > 0.f ? goal->acc_scale : 0.6);
-
-    const std::string arm_group   = goal->arm_group.empty()   ? "arm"   : goal->arm_group;
-    const std::string hand_group  = goal->hand_group.empty()  ? "hand"  : goal->hand_group;
-    const std::string eef_link    = goal->eef_link.empty()    ? "tool0" : goal->eef_link;
-    const std::string ik_frame    = goal->ik_frame.empty()    ? "tool0" : goal->ik_frame;
-    const std::string open_state  = goal->open_named_state.empty()  ? "open"  : goal->open_named_state;
-    const std::string close_state = goal->close_named_state.empty() ? "close" : goal->close_named_state;
-
-    task.setProperty("group", arm_group);
-    task.setProperty("eef",   eef_link);
-    task.setProperty("ik_frame", ik_frame);
-
-    // Helper: wrap stages that need pose targets with ComputeIK
-    auto IK = [&](const std::string& name,
-                    std::unique_ptr<mtc::Stage> inner,
-                    const geometry_msgs::msg::PoseStamped& target){
-        auto ik = std::make_unique<stages::ComputeIK>(name, std::move(inner));
-        ik->setProperty("group", arm_group);
-        ik->setProperty("eef",   eef_link);
-        ik->setProperty("ik_frame", ik_frame);
-        ik->setTargetPose(target);
-        return ik; // returns unique_ptr<Stage> (ComputeIK derives from Stage)
-    };
-
-    // Stages
-    task.add(std::make_unique<stages::CurrentState>("current"));
-
-    // to approach (PTP)
-    {
-      auto move = std::make_unique<stages::MoveTo>("to approach (ptp)", ptp);
-      move->setProperty("group", arm_group);
-      task.add(IK("ik(approach)", std::move(move), goal->approach));
-    }
-
-    // open gripper
-    {
-      auto open = std::make_unique<stages::MoveTo>("open gripper", hand);
-      open->setProperty("group", hand_group);
-      open->setGoal(open_state);
-      task.add(std::move(open));
-    }
-
-    // approach -> grasp (LIN)
-    {
-      auto lin = std::make_unique<stages::MoveTo>("approach->grasp (lin)", cart);
-      lin->setProperty("group", arm_group);
-      task.add(IK("ik(grasp)", std::move(lin), goal->grasp));
-    }
-
-    // close gripper
-    {
-      auto close = std::make_unique<stages::MoveTo>("close gripper", hand);
-      close->setProperty("group", hand_group);
-      close->setGoal(close_state);
-      task.add(std::move(close));
-    }
-
-    // attach object (if provided)
-    if (!goal->object_id.empty()) {
-      auto attach = std::make_unique<stages::ModifyPlanningScene>("attach");
-      attach->attachObject(goal->object_id, eef_link);
-      task.add(std::move(attach));
-    }
-
-    // grasp -> retreat (LIN)
-    {
-      auto lin_retreat = std::make_unique<stages::MoveTo>("grasp->retreat (lin)", cart);
-      lin_retreat->setProperty("group", arm_group);
-      task.add(IK("ik(retreat)", std::move(lin_retreat), goal->retreat));
-    }
-
-    // Enable MTC Introspection
-    // task.enableIntrospection(shared_from_this(), rclcpp::Duration::from_seconds(0.3));
-    task.enableIntrospection(true);
-
     // --- Plan ---
     send_feedback("planning", "", 0.33f);
+    RCLCPP_INFO(get_logger(), "Planning");
 
     moveit::core::MoveItErrorCode plan_ec;
     try {
-      plan_ec = task.plan(1);
+      plan_ec = task.plan(1);  // try to find 1 solution
+      result.message = "MTC plan pick_and_place OK";
     } catch (const std::exception& e) {
       result.success = false; result.error_code = 11;
       result.message = std::string("Planning threw: ") + e.what();
@@ -216,15 +313,16 @@ private:
       return;
     }
 
-    // Execute (coarse feedback)
+    // --- Execute (coarse feedback) ---
     send_feedback("executing", "starting", 0.0f);
+    RCLCPP_INFO(get_logger(), "Executing");
 
     moveit::core::MoveItErrorCode exec_ec;
     try {
-      auto solution = task.solutions().front();   // get first solution
-      // Optional: publish a mid-progress tick
+      auto solution = task.solutions().front();
       send_feedback("executing", "running", 0.5f);
       exec_ec = task.execute(*solution);
+      result.message = "MTC execution pick_and_place OK";
     } catch (const std::exception& e) {
       result.success = false; result.error_code = 22;
       result.message = std::string("Execution threw: ") + e.what();
@@ -242,9 +340,22 @@ private:
     send_feedback("executing", "done", 1.0f);
     result.success = true; result.error_code = 0; result.message = "Plan+Execute succeeded.";
     goal_handle->succeed(std::make_shared<PlanAndExecute::Result>(result));
-  }
+
+  RCLCPP_INFO(get_logger(), "Something else went wrong - Returning");
+  return;
 };
+};
+}
 
-} // namespace compare_flexbe_utilities
+int main(int argc, char** argv)
+{
+  rclcpp::init(argc, argv);
 
-RCLCPP_COMPONENTS_REGISTER_NODE(compare_flexbe_utilities::MtcPlanAndExecuteNode)
+  auto node = std::make_shared<compare_flexbe_utilities::MtcPlanAndExecutePickActionNode>();
+
+  rclcpp::executors::MultiThreadedExecutor exec;
+  exec.add_node(node);
+  exec.spin();
+  rclcpp::shutdown();
+  return 0;
+}
