@@ -75,10 +75,10 @@ class PlaneSegmentationServiceState(EventState):
 
         # Write userdata
         try:
-            userdata.cloud_without_plane = self._res.cloud_without_plane
+            userdata.cloud_without_plane = self._res.without_plane
             userdata.plane_indices = self._res.plane_indices
             userdata.plane_coefficients = self._res.plane_coefficients
-            userdata.plane_inlier_count = self._res.plane_inlier_count
+            userdata.plane_inlier_count = self._res.inlier_count
         except Exception as e:
             Logger.logerr(f"[{type(self).__name__}] Failed to write userdata: {e}")
             return 'failed'
